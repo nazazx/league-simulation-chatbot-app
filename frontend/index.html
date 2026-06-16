@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>League Simulation</title>
+  <meta name="description" content="Custom football league workspace with schedule simulation, forecasts, and an AI analyst">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/styles.css?v=3">
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+</head>
+<body>
+  <div id="app">
+    <div class="header">
+      <h1>League Simulation</h1>
+      <p>Custom league workspace • Schedule simulator • Forecast engine • AI analyst</p>
+    </div>
+
+    <div class="container">
+      <!-- Action Buttons -->
+      <div class="actions">
+        <button class="btn btn-primary" @click="generateFixtures" :disabled="fixturesExist || loading">
+          Build Schedule
+        </button>
+        <button class="btn btn-success" @click="playNextWeek" :disabled="!fixturesExist || allPlayed || loading">
+          Run Next Week
+        </button>
+        <button class="btn btn-warning" @click="playAll" :disabled="!fixturesExist || allPlayed || loading">
+          Run Season
+        </button>
+        <button class="btn btn-info" @click="openHistoricalModal" :disabled="loading">
+          Form Archive
+        </button>
+        <button class="btn btn-danger" @click="resetLeague" :disabled="loading">
+          Clear Season
+        </button>
+      </div>
+
+      <!-- Team Studio -->
+      <section class="team-studio">
+        <div class="studio-header">
+          <div>
+            <div class="section-title">Team Studio</div>
+            <div class="section-subtitle">Roster workspace</div>
+          </div>
+          <div class="roster-pill" :class="rosterMessageType">
+            {{ teams.length }} teams · {{ rosterMessage }}
+          </div>
+        </div>
+
+        <div class="studio-grid">
+          <form class="team-form" @submit.prevent="saveTeam">
+            <input class="field team-name-input" v-model="newTeam.name" placeholder="Team name" :disabled="rosterLocked || loading">
+            <div class="rating-grid">
+              <label>
+                <span>Strength</span>
+                <input class="field" type="number" min="1" max="100" v-model.number="newTeam.strength" :disabled="rosterLocked || loading">
+              </label>
+              <label>
+                <span>Attack</span>
+                <input class="field" type="number" min="1" max="100" v-model.number="newTeam.attack_rating" :disabled="rosterLocked || loading">
+              </label>
+              <label>
+                <span>Defense</span>
+                <input class="field" type="number" min="1" max="100" v-model.number="newTeam.defense_rating" :disabled="rosterLocked || loading">
+              </label>
+              <label>
+                <span>Form</span>
+                <input class="field" type="number" min="1" max="100" v-model.number="newTeam.form_rating" :disabled="rosterLocked || loading">
+              </label>
+            </div>
+            <button class="btn btn-primary" type="submit" :disabled="rosterLocked || loading">Save Team</button>
+          </form>
+
+          <div class="roster-list">
+            <div class="roster-row" v-for="team in teams" :key="team.id">
+              <div>
+                <div class="team-name">{{ team.name }}</div>
+                <div class="team-ratings">
+                  STR {{ team.strength }} · ATK {{ team.attack_rating }} · DEF {{ team.defense_rating }} · FORM {{ team.form_rating }}
+                </div>
+              </div>
+              <button class="icon-btn danger" @click="deleteTeam(team)" :disabled="rosterLocked || loading" title="Delete team">×</button>
+            </div>
+            <div class="empty compact" v-if="!teams.length">No teams yet</div>
+          </div>
+
+          <form class="bulk-import" @submit.prevent="importTeams">
+            <textarea class="field import-box" v-model="bulkTeamText" :disabled="rosterLocked || loading"></textarea>
+            <div class="bulk-actions">
+              <label class="check-row">
+                <input type="checkbox" v-model="bulkReplace" :disabled="rosterLocked || loading">
+                Replace roster
+              </label>
+              <button class="btn btn-info" type="submit" :disabled="rosterLocked || loading">Import Teams</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- Simulating indicator -->
+      <div class="simulating" v-if="simulating">Simulating matches...</div>
+
+      <!-- Main Grid -->
+      <div class="grid">
+        <!-- League Table -->
+        <div class="panel">
+          <div class="panel-title"><span class="icon">🏆</span> Table</div>
+          <div class="panel-body">
+            <table v-if="standings.length">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Team</th>
+                  <th>P</th>
+                  <th>W</th>
+                  <th>D</th>
+                  <th>L</th>
+                  <th>GF</th>
+                  <th>GA</th>
+                  <th>GD</th>
+                  <th>PTS</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(s, i) in standings" :key="s.team_id"
+                    :class="{ 'row-animated': animateTable }"
+                    :style="{ animationDelay: (i * 0.08) + 's' }">
+                  <td><span class="rank-badge" :class="'rank-' + (i + 1)">{{ i + 1 }}</span></td>
+                  <td class="team-name">{{ s.team_name }}</td>
+                  <td>{{ s.played }}</td>
+                  <td>{{ s.wins }}</td>
+                  <td>{{ s.draws }}</td>
+                  <td>{{ s.losses }}</td>
+                  <td>{{ s.goals_for }}</td>
+                  <td>{{ s.goals_against }}</td>
+                  <td>{{ s.goal_difference > 0 ? '+' + s.goal_difference : s.goal_difference }}</td>
+                  <td class="pts">{{ s.points }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="empty" v-else>
+              <span class="empty-icon">📋</span>
+              No matches played yet
+            </div>
+          </div>
+        </div>
+
+        <!-- Match Results -->
+        <div class="panel">
+          <div class="panel-title"><span class="icon">⚽</span> Week Board</div>
+          <div class="panel-body">
+            <div class="week-nav" v-if="totalWeeks > 0">
+              <button class="week-btn" @click="viewWeek--" :disabled="viewWeek <= 1">‹</button>
+              <span class="week-label">
+                Week {{ viewWeek }} / {{ totalWeeks }}
+                <span class="week-subtle">{{ matches.length }} total fixtures</span>
+              </span>
+              <button class="week-btn" @click="viewWeek++" :disabled="viewWeek >= totalWeeks">›</button>
+            </div>
+
+            <div v-if="currentWeekMatches.length">
+              <div class="match-card" v-for="(m, mi) in currentWeekMatches" :key="m.id">
+                <span class="match-team home">{{ teamName(m.home_team_id) }}</span>
+                <span class="match-score"
+                      :class="{ 'not-played': !m.played, 'score-animated': m.played && animateScores }">
+                  <template v-if="m.played">{{ m.home_score }} – {{ m.away_score }}</template>
+                  <template v-else>vs</template>
+                </span>
+                <span class="match-team away">{{ teamName(m.away_team_id) }}</span>
+                <button class="match-edit" @click="openEditMatch(m)">✎ Edit</button>
+              </div>
+            </div>
+            <div class="empty" v-else>
+              <span class="empty-icon">{{ fixturesExist ? '📅' : '📋' }}</span>
+              {{ fixturesExist ? 'No matches for this week' : 'Build schedule first' }}
+            </div>
+          </div>
+        </div>
+
+        <!-- Forecast -->
+        <div class="panel">
+          <div class="panel-title">
+            <span class="icon">🎯</span>
+            <template v-if="predictionsVisible">Week {{ predictionMeta.current_week }} Predictions</template>
+            <template v-else>Forecast</template>
+          </div>
+          <div class="panel-body">
+            <template v-if="predictionsVisible && predictions.length">
+              <div class="pred-card" v-for="p in predictions" :key="p.team_id">
+                <div class="pred-card-team">
+                  <span class="team-name">{{ p.team_name }}</span>
+                  <span class="prob">%{{ p.championship_probability }}</span>
+                </div>
+                <div class="pred-bar-bg">
+                  <div class="pred-bar" :style="{ width: p.championship_probability + '%' }"></div>
+                </div>
+                <div class="pred-card-meta">
+                  <span>📊 {{ p.current_points }} pts</span>
+                  <span>🎯 Pred: {{ p.predicted_points }}</span>
+                  <span>🏅 Top2: {{ p.top_two_probability }}%</span>
+                </div>
+              </div>
+            </template>
+            <div class="pred-not-ready" v-else>
+              <span class="pred-lock-icon">🔒</span>
+              {{ predictionEmptyMessage }}
+            </div>
+          </div>
+        </div>
+
+        <!-- Historical Stats -->
+        <div class="panel full-width">
+          <div class="panel-title"><span class="icon">📈</span> Form Archive</div>
+          <div class="panel-body">
+            <table v-if="historicalStats.length">
+              <thead>
+                <tr>
+                  <th>Team</th>
+                  <th>Matches</th>
+                  <th>Win %</th>
+                  <th>PPM</th>
+                  <th>GF/M</th>
+                  <th>GA/M</th>
+                  <th>Rating</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="s in historicalStatsWithNames" :key="s.team_id">
+                  <td class="team-name">{{ s.team_name }}</td>
+                  <td>{{ s.matches_played }}</td>
+                  <td>{{ Math.round(s.win_rate * 100) }}%</td>
+                  <td>{{ Number(s.points_per_match).toFixed(2) }}</td>
+                  <td>{{ Number(s.goals_for_per_match).toFixed(2) }}</td>
+                  <td>{{ Number(s.goals_against_per_match).toFixed(2) }}</td>
+                  <td class="pts">{{ Number(s.historical_rating).toFixed(1) }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="empty" v-else>
+              <span class="empty-icon">📈</span>
+              No form archive yet
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Edit Match Modal -->
+    <div class="modal-backdrop" v-if="editOpen" @click.self="editOpen = false">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">✎ Edit Match Result</div>
+          <button class="modal-close" @click="editOpen = false">×</button>
+        </div>
+        <div class="score-form" v-if="editMatch">
+          <div>
+            <div class="score-label">{{ teamName(editMatch.home_team_id) }} (Home)</div>
+            <input class="field" type="number" min="0" v-model.number="editHomeScore">
+          </div>
+          <div>
+            <div class="score-label">{{ teamName(editMatch.away_team_id) }} (Away)</div>
+            <input class="field" type="number" min="0" v-model.number="editAwayScore">
+          </div>
+          <button class="btn btn-success" @click="saveMatchEdit" :disabled="loading">✓ Save Result</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Historical Data Modal -->
+    <div class="modal-backdrop" v-if="historicalOpen" @click.self="historicalOpen = false">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">📊 Form Archive</div>
+          <button class="modal-close" @click="historicalOpen = false">×</button>
+        </div>
+        <div class="modal-toolbar">
+          <input class="field" v-model="historicalSearch" placeholder="Search by team or season">
+          <select class="field" v-model="historicalSeason">
+            <option value="">All seasons</option>
+            <option v-for="season in historicalSeasons" :key="season" :value="season">{{ season }}</option>
+          </select>
+        </div>
+        <div class="modal-body">
+          <table v-if="filteredHistoricalMatches.length">
+            <thead>
+              <tr>
+                <th>Season</th>
+                <th>Week</th>
+                <th>Home</th>
+                <th>Score</th>
+                <th>Away</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="m in filteredHistoricalMatches" :key="m.id">
+                <td>{{ m.season }}</td>
+                <td>{{ m.week }}</td>
+                <td class="team-name">{{ m.home_team }}</td>
+                <td class="pts">{{ m.home_score }} – {{ m.away_score }}</td>
+                <td class="team-name">{{ m.away_team }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="empty" v-else>
+            <span class="empty-icon">📊</span>
+            No archived matches found
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Floating Chat Button -->
+    <button class="chat-fab" @click="openChat" v-show="!chatOpen" title="League Analyst">
+      💬
+      <span class="badge" v-if="unreadCount">{{ unreadCount }}</span>
+    </button>
+
+    <!-- Chat Drawer -->
+    <div class="chat-drawer-backdrop" v-if="chatOpen" @click="closeChat"></div>
+    <div class="chat-drawer" v-if="chatVisible" :class="{ closing: chatClosing }">
+      <div class="chat-drawer-header">
+        <div class="chat-drawer-title">
+          <span class="online-dot"></span>
+          League Analyst
+        </div>
+        <button class="chat-drawer-close" @click="closeChat">×</button>
+      </div>
+      <div class="chat-messages" ref="chatContainer">
+        <div class="chat-message" v-for="(message, index) in chatMessages" :key="index" :class="{ user: message.role === 'user' }">
+          {{ message.content }}
+          <div class="chat-meta" v-if="message.source">
+            {{ message.source }}<template v-if="message.model"> · {{ message.model }}</template><template v-if="message.tool_calls?.length"> · tools: {{ message.tool_calls.join(', ') }}</template>
+          </div>
+        </div>
+      </div>
+      <form class="chat-form" @submit.prevent="sendChatMessage">
+        <input class="field" v-model="chatInput" placeholder="Ask about the table, forecasts, or schedule..." ref="chatInputEl">
+        <button class="btn btn-primary" type="submit" :disabled="chatLoading || !fixturesExist">
+          {{ chatLoading ? '⏳' : '➤' }}
+        </button>
+      </form>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" :class="statusType" v-if="statusMsg">{{ statusMsg }}</div>
+  </div>
+
+  <!-- JavaScript: API client first, then app logic -->
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

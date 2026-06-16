@@ -1,0 +1,27 @@
+# .gitignore
+.DS_Store
+.antigravitycli/
+.env
+
+# Local build artifacts
+server
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Local notes / generated reports
+ARCHITECTURE_REPORT.md
+PROJECT_REPORT.md
+
+# Case / reference artifacts
+*.pdf
+Screenshot*.png
+*.log
+
+# Dependencies / temp files
+/vendor/
+/tmp/
